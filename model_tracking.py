@@ -9,51 +9,31 @@ from .helpers import get_named_modules_from_network, find_network_modules_by_nam
 
 
 # list all of all module vars
-ALL_VARS = ['w', 'b', 'inp', 'out', 'w_grad', 'b_grad', 'inp_grad', 'out_grad']
-STATE_VARS = ['w', 'b']  # vars that can be queried at any time
-STATE_GRAD_VARS = ['w_grad', 'b_grad']  # gradients of state vars
+ALL_VARS = ['inp', 'out', 'inp_grad', 'out_grad']
 FORWARD_VARS = ['inp', 'out']  # vars that require a forward pass
 BACKWARD_VARS = ['inp_grad', 'out_grad']  # vars that require a backward pass
-# vars whose values are dependent on the data stream
-DATA_DEPENDENT_VARS = ['inp', 'out', 'w_grad', 'b_grad', 'inp_grad', 'out_grad']
 
 GRAPH_VARS = ['inp', 'out', 'inp_grad', 'out_grad']  # vars existing solely within the computation graph
 
 # default module tracking protocol
 DEFAULT_TRACKING_PROTOCOL = {
-    'track_w': True,
-    'track_b': True,
     'track_inp': True,
     'track_out': True,
-    'track_w_grad': True,
-    'track_b_grad': True,
     'track_inp_grad': True,
     'track_out_grad': True,
-    'record_every_w': 1,
-    'record_every_b': 1,
     'record_every_inp': 1,
     'record_every_out': 1,
-    'record_every_w_grad': 1,
-    'record_every_b_grad': 1,
     'record_every_inp_grad': 1,
     'record_every_out_grad': 1,
-    'buffer_len_w': 1,
-    'buffer_len_b': 1,
     'buffer_len_inp': 1,
     'buffer_len_out': 1,
-    'buffer_len_w_grad': 1,
-    'buffer_len_b_grad': 1,
     'buffer_len_inp_grad': 1,
     'buffer_len_out_grad': 1,
     'save': False,
     'save_protocol': 'npz',
     'save_file_base': '',
-    'suffix_w': 'w',
-    'suffix_b': 'b',
     'suffix_inp': 'inp',
     'suffix_out': 'out',
-    'suffix_w_grad': 'w_grad',
-    'suffix_b_grad': 'b_grad',
     'suffix_inp_grad': 'inp_grad',
     'suffix_out_grad': 'out_grad'
 }
@@ -90,10 +70,11 @@ class TrackingProtocol(Protocol):
                  **overwrite_protocol):
         super(TrackingProtocol, self).__init__()
         # track only the vars specified
-        for var in ALL_VARS:
-            if var in vars_:
-                continue
-            self.proto_dict['track_%s' % var] = False
+        if len(vars_) > 0:
+            for var in ALL_VARS:
+                if var in vars_:
+                    continue
+                self.proto_dict['track_%s' % var] = False
         # allow universal record_every specification
         if record_every:
             for protocol in DEFAULT_TRACKING_PROTOCOL:
@@ -116,19 +97,17 @@ class TrackingProtocol(Protocol):
         self._set_forward_backward()
 
     def _set_forward_backward(self):
-        track_forward = False
+        track_forward = True
         track_backward = False
-        if any([self.track_w_grad, self.track_b_grad, self.track_inp_grad, self.track_out_grad]):
+        if any([self.track_inp_grad, self.track_out_grad]):
             track_backward = True
-        if any([self.track_w, self.track_b, self.track_inp, self.track_out]):
-            track_forward = True
         self.track_forward, self.track_backward = track_forward, track_backward
 
 
 class ModuleTracker:
     # TODO implement buffer length management
 
-    def __init__(self, protocol: TrackingProtocol, *modules: Module,
+    def __init__(self, *modules: Module, protocol: TrackingProtocol = None,
                  hook_manager: HookManager = None, network: Module = None,
                  **named_modules: Module):
         """
@@ -139,6 +118,8 @@ class ModuleTracker:
         :param network: Module representing the full network containing the passed modules. Used in aggregate_vars.
         :param named_modules: Dict[str, Module] of modules to be tracked, indexed by name
         """
+        if protocol is None:
+            protocol = TrackingProtocol()
         self.network = network
 
         if hook_manager is None:
@@ -197,24 +178,6 @@ class ModuleTracker:
     def _do_collect(self, var):
         return self.protocol['track_%s' % var] and self.pass_count % self.protocol['record_every_%s' % var] == 0
 
-    def collect_weight(self, module_name):
-        return self.modules[module_name].weight.data.cpu()
-
-    def collect_bias(self, module_name):
-        return self.modules[module_name].bias.data.cpu()
-
-    def collect_weight_grad(self, module_name):
-        grad = self.modules[module_name].weight.grad
-        assert grad is not None, "gradient is None for module '%s'. Make sure you are calling collect" \
-                                 "before zero_grad." % module_name
-        return grad.cpu()
-
-    def collect_bias_grad(self, module_name):
-        grad = self.modules[module_name].bias.grad
-        assert grad is not None, "gradient is None for module '%s'. Make sure you are calling collect" \
-                                 "before zero_grad." % module_name
-        return grad.cpu()
-
     # TODO modify to allow tracking for modules with multiple inputs
     def forward_hook(self, module, input, output):
         (inp,) = input
@@ -223,10 +186,6 @@ class ModuleTracker:
             self._insert_module_data(module.name, 'inp', inp.data.cpu())
         if self._do_collect('out'):
             self._insert_module_data(module.name, 'out', output.data.cpu())
-        if self._do_collect('w'):
-            self._insert_module_data(module.name, 'w', self.collect_weight(module.name))
-        if self._do_collect('b'):
-            self._insert_module_data(module.name, 'b', self.collect_bias(module.name))
 
         self._complete_module_forward(module.name)
 
@@ -237,10 +196,6 @@ class ModuleTracker:
             self._insert_module_data(module.name, 'inp_grad', grad_in.cpu())
         if self._do_collect('out_grad'):
             self._insert_module_data(module.name, 'out_grad', grad_out.cpu())
-        if self._do_collect('w_grad'):
-            self._insert_module_data(module.name, 'w_grad', grad_weight.cpu())
-        if self._do_collect('b_grad'):
-            self._insert_module_data(module.name, 'b_grad', grad_bias.cpu())
 
         self._complete_module_backward(module.name)
 
@@ -271,20 +226,20 @@ class ModuleTracker:
     def clear_data_buffer_all(self, vars_: List[str] = None):
         self.clear_data_buffer_module(*self.module_names, vars_=vars_)
 
-    @validate_vars(var_idx=2, valid_vars=DATA_DEPENDENT_VARS)
+    @validate_vars(var_idx=2)
     def gather_module_var(self, module_name, var):
         return torch.cat(self.data_buffer[module_name][var], dim=0)
 
-    def gather_module_data(self, module_name):
+    def gather_module(self, module_name):
         return {var: torch.cat(data, dim=0) for var, data in self.data_buffer[module_name].items()}
 
-    def gather_var_data(self, var_name):
+    def gather_var(self, var_name):
         return {module_name: torch.cat(self.data_buffer[module_name][var_name], dim=0)
                 for module_name in self.data_buffer}
 
     # TODO export var data hashed by corresponding protocol suffix
-    def gather_data(self):
-        return {module_name: self.gather_module_data(module_name) for module_name in self.data_buffer}
+    def gather(self):
+        return {module_name: self.gather_module(module_name) for module_name in self.data_buffer}
 
     def track(self, clear_on_exit: bool = True):
         exit_fns = [self._cleanup_tracking]
@@ -304,7 +259,7 @@ class ModuleTracker:
 
     def aggregate_vars(self, dataloader: DataLoader, network: Module = None, device=0, clear=True):
         self.collect_vars(dataloader, network=network, device=device)
-        ret = self.gather_data()
+        ret = self.gather()
         if clear:
             self.clear_data_buffer_all()
         return ret
