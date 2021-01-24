@@ -1,5 +1,5 @@
 from inspect import getfullargspec
-from .helpers import CustomContext
+from helpers import CustomContext
 from torch import Tensor
 import torch
 from torch.nn import Module
@@ -282,9 +282,9 @@ class HookManager:
             'input': self.input_cache[module.name],
             'output': self.output_cache[module.name]
         }
-        if recursion_depth < self.max_recursion_depth:
+        """if recursion_depth < self.max_recursion_depth:
             for name, module in module._modules.items():
-                ret_dict[name] = self._get_hook_params_forward(module, recursion_depth=recursion_depth + 1)
+                ret_dict[name] = self._get_hook_params_forward(module, recursion_depth=recursion_depth + 1)"""
 
         return ret_dict
 
@@ -297,7 +297,8 @@ class HookManager:
         if self.retain_forward_cache:
             ret_dict['input'] = self.input_cache[module.name]
             ret_dict['output'] = self.output_cache[module.name]
-        for param_name in module._parameters.keys():
+
+        """for param_name in module._parameters.keys():
             if param_name not in self.valid_module_params[module.name]:
                 val = None
             else:
@@ -305,7 +306,7 @@ class HookManager:
             ret_dict['grad_%s' % param_name] = val
         if recursion_depth < self.max_recursion_depth:
             for name, module in module._modules.items():
-                ret_dict[name] = self._get_hook_params_backward(module, recursion_depth=recursion_depth + 1)
+                ret_dict[name] = self._get_hook_params_backward(module, recursion_depth=recursion_depth + 1)"""
 
         return ret_dict
 

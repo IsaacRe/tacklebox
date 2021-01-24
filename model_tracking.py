@@ -4,8 +4,8 @@ import torch
 from typing import Type, List
 import json
 import warnings
-from .hook_management import HookManager
-from .helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass, Protocol
+from hook_management import HookManager
+from helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass, Protocol
 
 
 # list all of all module vars
@@ -120,6 +120,7 @@ class ModuleTracker:
         """
         if protocol is None:
             protocol = TrackingProtocol()
+
         self.network = network
 
         if hook_manager is None:
@@ -173,7 +174,14 @@ class ModuleTracker:
         self._reset_modules_passed()
 
     def _insert_module_data(self, module_name, var, data):
-        self.data_buffer[module_name][var] += [data]
+        buffer = self.data_buffer[module_name][var]
+        max_len = self.protocol['buffer_len_%s' % var]
+        if len(buffer) >= max_len:
+            warnings.warn('Cached %s data for module %s exceeded buffer length of %d. '
+                          'Discarding earliest cached data.' % (var, module_name, max_len))
+            while len(buffer) >= max_len:
+                buffer.pop(0)
+        buffer += [data]
 
     def _do_collect(self, var):
         return self.protocol['track_%s' % var] and self.pass_count % self.protocol['record_every_%s' % var] == 0
@@ -189,7 +197,7 @@ class ModuleTracker:
 
         self._complete_module_forward(module.name)
 
-    def backward_hook(self, module, grad_in, grad_weight, grad_bias, grad_out):
+    def backward_hook(self, module, grad_in, grad_out):
         (grad_in,) = grad_in
 
         if self._do_collect('inp_grad'):
@@ -231,13 +239,13 @@ class ModuleTracker:
         return torch.cat(self.data_buffer[module_name][var], dim=0)
 
     def gather_module(self, module_name):
-        return {var: torch.cat(data, dim=0) for var, data in self.data_buffer[module_name].items()}
+        return {var: torch.cat(data, dim=0) if len(data) > 0 else torch.FloatTensor()
+                for var, data in self.data_buffer[module_name].items()}
 
     def gather_var(self, var_name):
         return {module_name: torch.cat(self.data_buffer[module_name][var_name], dim=0)
                 for module_name in self.data_buffer}
 
-    # TODO export var data hashed by corresponding protocol suffix
     def gather(self):
         return {module_name: self.gather_module(module_name) for module_name in self.data_buffer}
 
