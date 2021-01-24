@@ -25,8 +25,9 @@ class HookFunction:
 
     HOOK_TYPES = ['forward_hook', 'backward_hook', 'forward_pre_hook']
 
-    def __init__(self, hook_fn, hook_type, name=None, modules=None):
+    def __init__(self, hook_fn, hook_type, name=None, modules=None, pass_by_pos=True):
         assert hook_type in self.HOOK_TYPES
+        self.pass_by_pos = pass_by_pos
         if name is None:
             name = repr(hook_fn)
         self.name = name
@@ -38,16 +39,22 @@ class HookFunction:
             self.register(*modules)
 
     def __call__(self, *args, **kwargs):
+        if self.pass_by_pos:
+            return self.function(*self._pass_params(*args, **kwargs))
         return self.function(**self._pass_params(*args, **kwargs))
+
+    @property
+    def _pos_arg_names(self):
+        if self.hook_type == 'forward_pre_hook':
+            return ['module', 'input']
+        elif self.hook_type == 'forward_hook':
+            return ['module', 'input', 'output']
+        elif self.hook_type == 'backward_hook':
+            return ['module', 'grad_in', 'grad_out']
 
     def _args2kwargs(self, args):
         kwargs = {}
-        if self.hook_type == 'forward_pre_hook':
-            pos_arg_names = ['module', 'input']
-        elif self.hook_type == 'forward_hook':
-            pos_arg_names = ['module', 'input', 'output']
-        elif self.hook_type == 'backward_hook':
-            pos_arg_names = ['module', 'grad_in', 'grad_out']
+        pos_arg_names = self._pos_arg_names
         if len(args) != len(pos_arg_names):
             error_string = "invalid number of positional args passed to %s '%s' ." \
                            "Call signature should be (%s) but got %d positional args." % \
@@ -58,10 +65,22 @@ class HookFunction:
 
         return kwargs
 
+    def _kwargs2args(self, kwargs):
+        pos_arg_names = self._pos_arg_names
+        args = []
+        try:
+            for name in pos_arg_names:
+                args += [kwargs[name]]
+        except KeyError as e:
+            raise KeyError('%s\nError: the above argument was not found in passed kwargs.')
+        return args
+
     def _pass_params(self, *args, **kwargs):
         if len(args) > 0:
             for k, v in self._args2kwargs(args).items():
                 kwargs[k] = v
+        if self.pass_by_pos:
+            return self._kwargs2args(kwargs)
         fn = self.function
         argspec = getfullargspec(fn)
         if argspec.varkw is not None:
