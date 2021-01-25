@@ -1,0 +1,6 @@
+__pycache__
+dist/*
+build/*
+.idea
+.ipynb_checkpoints
+tacklebox.egg-info
