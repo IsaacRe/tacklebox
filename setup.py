@@ -20,7 +20,7 @@ setup(
         "Programming Language :: Python :: 3.7"
     ],
     packages=find_packages(exclude=("tests",)),
-    include_package_data=True,
+    include_package_data=False,
     install_requires=[
         'torch',
         'inspect',
@@ -28,9 +28,4 @@ setup(
         'tqdm',
         'warnings'
     ],
-    entry_points={
-        'console_scripts': [
-            'tacklebox.__main__:main'
-        ]
-    }
 )
