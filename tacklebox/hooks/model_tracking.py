@@ -4,8 +4,8 @@ import torch
 from typing import Type, List
 import json
 import warnings
-from hook_management import HookManager
-from helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass, Protocol
+from ..hook_management import HookManager
+from ..helpers import get_named_modules_from_network, find_network_modules_by_name, data_pass, Protocol
 
 
 # list all of all module vars
