@@ -21,6 +21,16 @@ def detach_hook(module, input, output):
     return output.detach()
 
 
+def validate_hook_category(fn):
+    valid = HookFunction.HOOK_TYPES + ['all']
+    def wrapped_fn(*args, category='all', **kwargs):
+        assert category in valid, '%s is not a valid hook category.' \
+                                  ' Choices are: %s' % (category, ', '.join(valid))
+        return fn(*args, category=category, **kwargs)
+
+    return wrapped_fn
+
+
 class HookFunction:
 
     HOOK_TYPES = ['forward_hook', 'backward_hook', 'forward_pre_hook']
@@ -562,34 +572,36 @@ class HookManager:
     def get_module_hooks_by_name(self, module_name, hook_types=[], **kwargs):
         return self.get_module_hooks(self.name_to_module[module_name], hook_types=hook_types, **kwargs)
 
-    def activate_module_hooks(self, *modules, hook_types=[]):
+    def activate_module_hooks(self, *modules, hook_types=[], category='all'):
         for module in modules:
-            for h in self.get_module_hooks(module, hook_types=hook_types, include_active=False):
+            for h in self.get_module_hooks(module, hook_types=hook_types, include_active=False, category=category):
                 h.activate()
         if self.wrap_calls:
             self._activate_base_hooks(*modules)
 
-    def activate_module_hooks_by_name(self, *module_names, hook_types=[]):
+    def activate_module_hooks_by_name(self, *module_names, hook_types=[], category='all'):
         for module_name in module_names:
-            for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_active=False):
+            for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_active=False,
+                                                   category=category):
                 h.activate()
         if self.wrap_calls:
             self._activate_base_hooks(*[self.name_to_module[module_name] for module_name in module_names])
 
-    def deactivate_module_hooks(self, *modules, hook_types=[]):
+    def deactivate_module_hooks(self, *modules, hook_types=[], category='all'):
         inactive_modules = []
         for module in modules:
-            for h in self.get_module_hooks(module, hook_types=hook_types, include_inactive=False):
+            for h in self.get_module_hooks(module, hook_types=hook_types, include_inactive=False, category=category):
                 h.deactivate()
             if self.wrap_calls and not self.is_module_hooked(module):
                 inactive_modules += [module]
         if self.wrap_calls:
             self._deactivate_base_hooks(*inactive_modules)
 
-    def deactivate_module_hooks_by_name(self, *module_names, hook_types=[]):
+    def deactivate_module_hooks_by_name(self, *module_names, hook_types=[], category='all'):
         inactive_modules = []
         for module_name in module_names:
-            for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_inactive=False):
+            for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_inactive=False,
+                                                   category=category):
                 h.deactivate()
             module = self.name_to_module[module_name]
             if self.wrap_calls and not self.is_module_hooked(module):
@@ -597,30 +609,34 @@ class HookManager:
         if self.wrap_calls:
             self._deactivate_base_hooks(*inactive_modules)
 
-    def activate_all_hooks(self, hook_types=[]):
-        self.activate_module_hooks(*self.modules, hook_types=hook_types)
+    def activate_all_hooks(self, hook_types=[], category='all'):
+        self.activate_module_hooks(*self.modules, hook_types=hook_types, category=category)
 
-    def deactivate_all_hooks(self, hook_types=[]):
-        self.deactivate_module_hooks(*self.modules, hook_types=hook_types)
+    def deactivate_all_hooks(self, hook_types=[], category='all'):
+        self.deactivate_module_hooks(*self.modules, hook_types=hook_types, category=category)
 
     ########################  Context Management  #######################################
 
-    def hook_module_context(self, *modules, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
-        enter_fns = [lambda: self.activate_module_hooks(*modules, hook_types=hook_types)]
-        exit_fns = [lambda: self.deactivate_module_hooks(*modules, hook_types=hook_types)]
+    def hook_module_context(self, *modules, hook_types=[], add_enter_fns=[], add_exit_fns=[], category='all'):
+        enter_fns = [lambda: self.activate_module_hooks(*modules, hook_types=hook_types, category=category)]
+        exit_fns = [lambda: self.deactivate_module_hooks(*modules, hook_types=hook_types, category=category)]
         enter_fns = list(add_enter_fns) + enter_fns
         exit_fns = exit_fns + list(add_exit_fns)
         return CustomContext(enter_fns=enter_fns, exit_fns=exit_fns)
 
-    def hook_module_context_by_name(self, *module_names, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
+    def hook_module_context_by_name(self, *module_names, hook_types=[], add_enter_fns=[], add_exit_fns=[],
+                                    category='all'):
         modules = [self.name_to_module[module_name] for module_name in module_names]
         return self.hook_module_context(*modules,
                                         hook_types=hook_types,
                                         add_enter_fns=add_enter_fns,
-                                        add_exit_fns=add_exit_fns)
+                                        add_exit_fns=add_exit_fns,
+                                        category=category)
 
-    def hook_all_context(self, hook_types=[], add_enter_fns=[], add_exit_fns=[]):
+    @validate_hook_category
+    def hook_all_context(self, hook_types=[], add_enter_fns=[], add_exit_fns=[], category='all'):
         return self.hook_module_context(*self.modules,
                                         hook_types=hook_types,
                                         add_enter_fns=add_enter_fns,
-                                        add_exit_fns=add_exit_fns)
+                                        add_exit_fns=add_exit_fns,
+                                        category=category)

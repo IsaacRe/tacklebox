@@ -20,4 +20,15 @@ if __name__ == '__main__':
     with tracker.track():
         model(x).sum().backward()
         raw = tracker.gather()
+
+    # try using category in HookManager context
+    hookmngr = tracker.hook_manager
+    with hookmngr.hook_all_context(category='forward_hook'):
+        model(x).sum().backward()
+        raw2 = tracker.gather()
+
+    with hookmngr.hook_all_context(category='backward_hook'):
+        model(x).sum().backward()
+        raw3 = tracker.gather()
+
     pass
