@@ -195,7 +195,6 @@ class HookManager:
                                                      name='HookManager._forward_hook_base')
             self.base_forward_pre_hook_fn = HookFunction(self._forward_pre_hook_base, 'forward_pre_hook',
                                                          name='HookManager._forward_pre_hook_base')
-            self.add_hook_fn(self.base_forward_hook_fn, self.base_forward_pre_hook_fn)
 
         self.retain_forward_cache = retain_forward_cache  # whether to retain cached forward vars through backward pass
         # levels of child-modules at which hooks will be recursively set
@@ -286,7 +285,6 @@ class HookManager:
                                                           activate=activate,
                                                           register_to_module=True)
         # TODO register recursively depending on self.recursion_depth
-        self.add_hook_handle(*handles)
         self._init_module_cache(*modules)
 
     def _activate_base_hooks(self, *modules):
@@ -561,10 +559,12 @@ class HookManager:
 
     def get_module_hooks(self, module, hook_types=[], category='all', include_active=True, include_inactive=True,
                          include_base_hooks=False):
-        for h in self.module_to_hookhandle[module]:
-            # do not return base hooks unless include_base_hooks is set
-            if h.hook_fn.function in [self._forward_hook_base, self._forward_pre_hook_base] and not include_base_hooks:
-                continue
+        if include_base_hooks:
+            handles = [hook_fn.module_to_handle[module] for hook_fn in (self.base_forward_pre_hook_fn,
+                                                                        self.base_forward_hook_fn)]
+        else:
+            handles = self.module_to_hookhandle[module]
+        for h in handles:
             if len(hook_types) > 0 and h.hook_fn.function not in hook_types:
                 continue
             if category != 'all' and category != h.hook_fn.hook_type:
