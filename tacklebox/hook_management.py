@@ -343,6 +343,9 @@ class HookManager:
             ret = hook_fn(module=module, input=input)
             if type(ret) == Tensor:
                 ret = (ret,)
+            else:
+                assert type(ret) == tuple,\
+                    'hook function returns must be either Tensors or tuples, not %s' % repr(type(ret))
             if ret is not None:
                 input = ret
 
