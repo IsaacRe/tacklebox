@@ -491,6 +491,7 @@ class HookManager:
         # Check if modules have already been registered with another hook function
         named_modules = [(None, module) for module in modules] + list(named_modules.items())
         new_modules = []
+        old_modules = []
         for module_name, module in named_modules:
             if module not in self.modules:
                 self.modules = self.modules.union({module})
@@ -503,11 +504,16 @@ class HookManager:
                 module.name = module_name
 
                 new_modules += [module]
+            else:
+                old_modules += [module]
 
-        # if wrap_calls then register base_hooks on all new modules
+        modules = [m for name, m in named_modules]
+
+        # if using base_hooks, register base_hooks on all new modules and activate base_hooks on all old modules
         if self.wrap_calls:
             self._register_base_hooks(*new_modules, activate=activate)
-        modules = [m for name, m in named_modules]
+            if activate:
+                self._activate_base_hooks(*old_modules)
 
         # Make sure module names were assigned properly
         assert all([hasattr(m, 'name') for name, m in named_modules])
