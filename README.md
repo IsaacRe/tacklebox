@@ -1,5 +1,6 @@
 ![logo](logo-words.png "TackleBox")
-### A framework for improved handling of PyTorch module hooks
+
+A framework for improved handling of PyTorch module hooks
 
 ## Installation
 ```shell
