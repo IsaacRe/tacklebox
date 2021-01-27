@@ -67,17 +67,17 @@ if __name__ == '__main__':
         print('Set %s input to zero' % module.name)
         ret = []
         for input in inputs:
-            if type(input) == torch.Tensor and input.dtype != torch.bool:
+            if type(input) == torch.Tensor and input.dtype == torch.float:
                 ret += [input - input]
             else:
                 ret += [input]
         return tuple(ret)
 
 
-    def print_mean(module, inputs, output):
+    def print_mean(module, inputs, outputs):
         print('%s input mean = %.2f, output mean = %.2f' % (module.name,
-                                                            inputs[0].sum().item() / output.numel(),
-                                                            output.sum().item() / output.numel()))
+                                                            inputs[0].sum().item() / inputs[0].numel(),
+                                                            outputs[0].sum().item() / outputs[0].numel()))
 
 
     hookmngr.register_forward_pre_hook(zero_input, hook_fn_name='zero_input', activate=False, **named_modules)
@@ -88,4 +88,8 @@ if __name__ == '__main__':
     # note we could use separate hook manager for XLM
 
     with hookmngr.hook_all_context() + torch.no_grad():
+        xlm(src)
+
+    # lets only activate our forward hooks
+    with hookmngr.hook_all_context(category='forward_hook') + torch.no_grad():
         xlm(src)

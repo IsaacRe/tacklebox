@@ -195,8 +195,6 @@ class HookManager:
                                                      name='HookManager._forward_hook_base')
             self.base_forward_pre_hook_fn = HookFunction(self._forward_pre_hook_base, 'forward_pre_hook',
                                                          name='HookManager._forward_pre_hook_base')
-            self.base_backward_hook_fn = HookFunction(self._backward_hook_base, 'backward_hook',
-                                                      name='HookManager._backward_hook_base')
 
         self.retain_forward_cache = retain_forward_cache  # whether to retain cached forward vars through backward pass
         # levels of child-modules at which hooks will be recursively set
@@ -245,9 +243,14 @@ class HookManager:
                 removable_handle.remove()
         self.input_hooks[module] = None
 
-    """def _clear_module_param_hooks(self, module, param):
+    def _clear_module_param_hook(self, module, param):
         self.param_hooks[module][param].remove()
-        self.param_hooks[module][param] = []"""
+        self.param_hooks[module][param] = None
+
+    def _clear_module_param_hooks(self, module):
+        for param in self.param_hooks[module]:
+            self._clear_module_param_hook(module, param)
+        self.param_hooks[module] = {}
 
     def _clear_module_output_hooks(self, module):
         for removable_handle in self.output_hooks[module]:
@@ -258,8 +261,7 @@ class HookManager:
     def _clear_module_tensor_hooks(self, module):
         self._clear_module_input_hooks(module)
         self._clear_module_output_hooks(module)
-        """for param in self.param_hooks[module]:
-            self._clear_module_param_hooks(module, param)"""
+        self._clear_module_param_hooks(module)
 
     def _clear_tensor_hooks(self):
         for module in self.modules:
@@ -272,7 +274,7 @@ class HookManager:
 
     def _clear_backward_module_cache(self, *modules):
         for module in modules:
-            """self.param_grad_cache[module.name] = {}"""
+            self.param_grad_cache[module.name] = {}
             self.input_grad_cache[module.name] = None
             self.output_grad_cache[module.name] = None
 
@@ -284,7 +286,7 @@ class HookManager:
             self.num_module_outputs[module.name] = -1
             """self.valid_module_params[module.name] = []"""
 
-    def _register_base_hooks(self, *modules, activate=False, backward=True):
+    def _register_base_hooks(self, *modules, activate=False):
         assert self.wrap_calls, 'base hooks should only be registered when wrap_calls is set'
         self.base_forward_hook_fn.register(*modules,
                                            activate=activate,
@@ -292,31 +294,19 @@ class HookManager:
         self.base_forward_pre_hook_fn.register(*modules,
                                                activate=activate,
                                                register_to_module=True)
-        if backward:
-            self.base_backward_hook_fn.register(*modules,
-                                                activate=activate,
-                                                register_to_module=True)
         # TODO register recursively depending on self.recursion_depth
         self._init_module_cache(*modules)
 
-    def _activate_base_hooks(self, *modules, include_backward=True):
-        hook_types = [self._forward_hook_base, self._forward_pre_hook_base]
-        if include_backward:
-            hook_types += [self._backward_hook_base]
+    def _activate_base_hooks(self, *modules):
         for module in modules:
             for h in self.get_module_hooks(module,
-                                           hook_types=hook_types,
                                            include_active=False,
                                            include_base_hooks=True):
                 h.activate()
 
-    def _deactivate_base_hooks(self, *modules, only_backward=False):
-        hook_types = [self._backward_hook_base]
-        if not only_backward:
-            hook_types += [self._forward_hook_base, self._forward_pre_hook_base]
+    def _deactivate_base_hooks(self, *modules):
         for module in modules:
             for h in self.get_module_hooks(module,
-                                           hook_types=hook_types,
                                            include_inactive=False,
                                            include_base_hooks=True):
                 h.deactivate()
@@ -343,7 +333,7 @@ class HookManager:
             ret_dict['inputs'] = self.input_cache[module.name]
             ret_dict['outputs'] = self.output_cache[module.name]
 
-        """for param_name in module._parameters.keys():
+        """for param_name, _ in module.named_parameters():
             if param_name not in self.valid_module_params[module.name]:
                 val = None
             else:
@@ -384,32 +374,32 @@ class HookManager:
             hook_fn = handle.hook_fn
             hook_fn(**param_dict)
 
-    """def _have_all_gradients(self, module):
-        have_input_grads = len(self.input_grad_cache[module.name]) == self.num_module_inputs[module.name]
+    def _grads_resolved(self, hook_list, grad_cache):
+        map_none = lambda x: 0 if x is None else 1
+        return sum(map(map_none, hook_list)) == sum(map(map_none, grad_cache))
+
+    def _have_all_gradients(self, module):
+        have_input_grads = self._grads_resolved(self.input_hooks[module], self.input_grad_cache[module.name])
         #print('Gradient computed for %d/%d module inputs' % (len(self.input_grad_cache[module.name]), self.num_module_inputs[module.name]))
-        have_param_grads = all([param in self.param_grad_cache[module.name] for param in
-                                self.valid_module_params[module.name]])
+        have_param_grads = self._grads_resolved(self.param_hooks[module].values(),
+                                                self.param_grad_cache[module.name].values())
         #print('Gradient not computed for params: %s' % ', '.join([p for p in self.valid_module_params[module.name]
         #                                                          if p not in self.param_grad_cache[module.name]]))
-        return have_input_grads and have_param_grads"""
+        return have_input_grads and have_param_grads
 
-    # TODO design better way to unhook tensors when backward pass has finished
     def _make_backward_hook_input(self, module, input_pos):
 
         def backward_hook(grad):
-            print('in input backward hook for %s' % module.name)
+            #print('in input backward hook for %s' % module.name)
             self.input_grad_cache[module.name][input_pos] = grad
 
             # if all input gradients have been accumulated, initiate module backward hooks
-            """if self._have_all_gradients(module):
-                self._execute_backward_hooks(module)
-                self._init_module_cache(module)
-
-            self._clear_module_input_hooks(module)"""
+            if self._have_all_gradients(module):
+                self._initiate_backward_hook(module)
 
         return backward_hook
 
-    """def _make_backward_hook_param(self, module, param_name):
+    def _make_backward_hook_param(self, module, param_name):
 
         def backward_hook(grad):
             #print('in param backward hook for %s of %s' % (param_name, module.name))
@@ -417,12 +407,9 @@ class HookManager:
 
             # if all input gradients have been accumulated, initiate module backward hooks
             if self._have_all_gradients(module):
-                self._execute_backward_hooks(module)
-                self._init_module_cache(module)
+                self._initiate_backward_hook(module)
 
-            self._clear_module_param_hooks(module, param_name)
-
-        return backward_hook"""
+        return backward_hook
 
     def _make_backward_hook_output(self, module, output_pos):
 
@@ -473,6 +460,14 @@ class HookManager:
         # if grad is enabled setup backward pass
         if torch.is_grad_enabled():
             """self.param_hooks[module] = {}"""
+            if module in self.param_hooks:
+                assert len(self.param_hooks[module]) == 0, \
+                    'param hooks for %s were not cleaned up during last backward pass' % module.name
+                assert len(self.param_grad_cache[module.name]) == 0, \
+                    'param grad cache for %s was not cleaned up during last backward pass' % module.name
+            else:
+                self.param_hooks[module] = {}
+                self.param_grad_cache[module.name] = {}
             self.output_hooks[module] = [None] * len(outputs)
             self.output_grad_cache[module.name] = [None] * len(outputs)
 
@@ -482,11 +477,13 @@ class HookManager:
                     removable_handle = out.register_hook(self._make_backward_hook_output(module, i))
                     self.output_hooks[module][i] = removable_handle
 
-            """for name, param in module._parameters.items():
-                if param is not None:
-                    self.valid_module_params[module.name] += [name]
+            for name, param in module.named_parameters():
+                if param is not None and param.requires_grad:
+                    """self.valid_module_params[module.name] += [name]"""
                     removable_handle = param.register_hook(self._make_backward_hook_param(module, name))
-                    self.param_hooks[module][name] = removable_handle"""
+                    self.param_hooks[module][name] = removable_handle
+                else:
+                    self.param_hooks[module][name] = None
 
         if not self.retain_forward_cache:
             self._clear_forward_module_cache(module)
@@ -496,7 +493,7 @@ class HookManager:
 
         return ret
 
-    def _backward_hook_base(self, module, *grads):
+    def _initiate_backward_hook(self, module):
         self._execute_backward_hooks(module)
         self._init_module_cache(module)
         self._clear_module_tensor_hooks(module)
@@ -549,7 +546,7 @@ class HookManager:
 
         # if using base_hooks, register base_hooks on all new modules and activate base_hooks on all old modules
         if self.wrap_calls:
-            self._register_base_hooks(*new_modules, activate=activate, backward=True)
+            self._register_base_hooks(*new_modules, activate=activate)
             if activate:
                 self._activate_base_hooks(*old_modules)
 
@@ -607,8 +604,7 @@ class HookManager:
                          include_base_hooks=False):
         if include_base_hooks:
             handles = [hook_fn.module_to_handle[module] for hook_fn in (self.base_forward_pre_hook_fn,
-                                                                        self.base_forward_hook_fn,
-                                                                        self.base_backward_hook_fn)]
+                                                                        self.base_forward_hook_fn)]
         else:
             handles = self.module_to_hookhandle[module]
         for h in handles:
