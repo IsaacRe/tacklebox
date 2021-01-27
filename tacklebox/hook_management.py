@@ -35,9 +35,12 @@ class HookFunction:
 
     HOOK_TYPES = ['forward_hook', 'backward_hook', 'forward_pre_hook']
 
-    def __init__(self, hook_fn, hook_type, name=None, modules=None, pass_by_pos=True):
-        assert hook_type in self.HOOK_TYPES
+    def __init__(self, hook_fn, hook_type, name=None, modules=None, pass_by_pos=True, retain_forward_cache=False):
+        assert hook_type in self.HOOK_TYPES, 'invalid hook type: %s' % hook_type
         self.pass_by_pos = pass_by_pos
+        self.retain_forward_cache = retain_forward_cache
+        if retain_forward_cache:
+            assert hook_type == 'backward_hook', 'retain_forward_cache option is exclusively for backward hooks'
         if name is None:
             name = repr(hook_fn)
         self.name = name
@@ -60,7 +63,10 @@ class HookFunction:
         elif self.hook_type == 'forward_hook':
             return ['module', 'inputs', 'outputs']
         elif self.hook_type == 'backward_hook':
-            return ['module', 'grad_in', 'grad_out']
+            if self.retain_forward_cache:
+                return ['module', 'grad_in', 'grad_out', 'inputs', 'outputs']
+            else:
+                return ['module', 'grad_in', 'grad_out']
 
     def _args2kwargs(self, args):
         kwargs = {}
@@ -177,7 +183,7 @@ class HookManager:
     """
 
     # TODO modify cache clearing to allow for recursive caching of module vars
-    def __init__(self, wrap_calls=True, recursion_depth=0, retain_forward_cache=False):
+    def __init__(self, wrap_calls=True, recursion_depth=0):
         # Lookup tables
         self.hook_fns = set()
         self.modules = set()
@@ -196,7 +202,9 @@ class HookManager:
             self.base_forward_pre_hook_fn = HookFunction(self._forward_pre_hook_base, 'forward_pre_hook',
                                                          name='HookManager._forward_pre_hook_base')
 
-        self.retain_forward_cache = retain_forward_cache  # whether to retain cached forward vars through backward pass
+        # tracks which module hooks require forward pass data to be cached until backward pass
+        self._retain_forward_cache = {}
+
         # levels of child-modules at which hooks will be recursively set
         self.max_recursion_depth = recursion_depth
         self.num_module_inputs = {}
@@ -323,13 +331,13 @@ class HookManager:
 
         return ret_dict
 
-    def _get_hook_params_backward(self, module, recursion_depth=0):
+    def _get_hook_params_backward(self, module, retain_forward_cache=False, recursion_depth=0):
         ret_dict = {
             'module': module,
             'grad_in': self.input_grad_cache[module.name],
             'grad_out': self.output_grad_cache[module.name],
         }
-        if self.retain_forward_cache:
+        if retain_forward_cache:
             ret_dict['inputs'] = self.input_cache[module.name]
             ret_dict['outputs'] = self.output_cache[module.name]
 
@@ -369,9 +377,9 @@ class HookManager:
 
     # TODO allow modification of grad_in by backward_hooks
     def _execute_backward_hooks(self, module):
-        param_dict = self._get_hook_params_backward(module)
         for handle in self.get_module_hooks(module, category='backward_hook', include_inactive=False):
             hook_fn = handle.hook_fn
+            param_dict = self._get_hook_params_backward(module, retain_forward_cache=hook_fn.retain_forward_cache)
             hook_fn(**param_dict)
 
     def _grads_resolved(self, hook_list, grad_cache):
@@ -485,7 +493,7 @@ class HookManager:
                 else:
                     self.param_hooks[module][name] = None
 
-        if not self.retain_forward_cache:
+        if len(self._retain_forward_cache[module]) == 0:
             self._clear_forward_module_cache(module)
 
         if return_tensor:
@@ -513,14 +521,15 @@ class HookManager:
             self.name_to_hookhandle[handle.name] = handle
 
     def register_hook(self, hook_type, function, *modules, hook_fn_name=None,
-                      activate=True, **named_modules):
+                      activate=True, retain_forward_cache=False, **named_modules):
         # Check if HookFunction obj has already been created for the given function
         if function in self.function_to_hookfn:
             hook_fn = self.function_to_hookfn[function]
         else:
             if hook_fn_name in self.name_to_hookfn:
                 hook_fn_name = increment_name(hook_fn_name)
-            hook_fn = HookFunction(function, hook_type, name=hook_fn_name)
+            hook_fn = HookFunction(function, hook_type, name=hook_fn_name,
+                                   retain_forward_cache=retain_forward_cache)
             self.add_hook_fn(hook_fn)
 
         # Check if modules have already been registered with another hook function
@@ -539,6 +548,7 @@ class HookManager:
                 module.name = module_name
 
                 new_modules += [module]
+                self._retain_forward_cache[module] = []
             else:
                 old_modules += [module]
 
@@ -558,6 +568,11 @@ class HookManager:
                                    activate=activate,
                                    register_to_module=not self.wrap_calls)
 
+        # TODO move wrap_calls statement above and merge with this one
+        if self.wrap_calls and activate and retain_forward_cache:
+            for module, handle in zip(modules, handles):
+                self._retain_forward_cache[module] += [handle]
+
         # Update hook handle lookup tables
         self.add_hook_handle(*handles)
 
@@ -567,9 +582,10 @@ class HookManager:
                            hook_fn_name=hook_fn_name, activate=activate, **named_modules)
 
     def register_backward_hook(self, function, *modules, hook_fn_name=None,
-                               activate=True, **named_modules):
+                               activate=True, retain_forward_cache=False, **named_modules):
         self.register_hook('backward_hook', function, *modules,
-                           hook_fn_name=hook_fn_name, activate=activate, **named_modules)
+                           hook_fn_name=hook_fn_name, activate=activate, retain_forward_cache=retain_forward_cache,
+                           **named_modules)
 
     def register_forward_pre_hook(self, function, *modules, hook_fn_name=None,
                                   activate=True, **named_modules):
@@ -587,13 +603,19 @@ class HookManager:
 
     def activate_hook_by_name(self, hook_name):
         handle = self.name_to_hookhandle[hook_name]
+        # if we will be activating a previously inactive handle that requires forward cache retention, add to list
+        if (not handle.is_active()) and handle.hook_fn.retain_forward_cache:
+            self._retain_forward_cache[handle.module] += [handle]
         handle.activate()
         # activate base_hooks if we are wrapping calls
         if self.wrap_calls:
-            self._activate_base_hooks(handle.module, include_backward=True)
+            self._activate_base_hooks(handle.module)
 
     def deactivate_hook_by_name(self, hook_name):
         handle = self.name_to_hookhandle[hook_name]
+        # if we are removing a handle that is requiring forward cache retention, remove from list
+        if handle in self._retain_forward_cache[handle.module]:
+            self._retain_forward_cache[handle.module].remove(handle)
         handle.deactivate()
         # if we have deactivated the last active hook for a module, deactivate base_hooks as well
         if self.wrap_calls:
@@ -624,6 +646,9 @@ class HookManager:
     def activate_module_hooks(self, *modules, hook_types=[], category='all'):
         for module in modules:
             for h in self.get_module_hooks(module, hook_types=hook_types, include_active=False, category=category):
+                # if activating a previously inactive handle that requires forward cache retention, add to list
+                if h.hook_fn.retain_forward_cache:
+                    self._retain_forward_cache[module] += [h]
                 h.activate()
         if self.wrap_calls:
             self._activate_base_hooks(*modules)
@@ -632,6 +657,9 @@ class HookManager:
         for module_name in module_names:
             for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_active=False,
                                                    category=category):
+                # if activating a previously inactive handle that requires forward cache retention, add to list
+                if h.hook_fn.retain_forward_cache:
+                    self._retain_forward_cache[h.module] += [h]
                 h.activate()
         if self.wrap_calls:
             self._activate_base_hooks(*[self.name_to_module[module_name] for module_name in module_names])
@@ -640,6 +668,9 @@ class HookManager:
         inactive_modules = []
         for module in modules:
             for h in self.get_module_hooks(module, hook_types=hook_types, include_inactive=False, category=category):
+                # if we are removing a handle that is requiring forward cache retention, remove from list
+                if h in self._retain_forward_cache[module]:
+                    self._retain_forward_cache[module].remove(h)
                 h.deactivate()
             if self.wrap_calls and not self.is_module_hooked(module):
                 inactive_modules += [module]
@@ -651,6 +682,9 @@ class HookManager:
         for module_name in module_names:
             for h in self.get_module_hooks_by_name(module_name, hook_types=hook_types, include_inactive=False,
                                                    category=category):
+                # if we are removing a handle that is requiring forward cache retention, remove from list
+                if h in self._retain_forward_cache[h.module]:
+                    self._retain_forward_cache[h.module].remove(h)
                 h.deactivate()
             module = self.name_to_module[module_name]
             if self.wrap_calls and not self.is_module_hooked(module):
