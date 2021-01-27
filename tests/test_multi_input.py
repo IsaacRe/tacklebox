@@ -93,3 +93,22 @@ if __name__ == '__main__':
     # lets only activate our forward hooks
     with hookmngr.hook_all_context(category='forward_hook') + torch.no_grad():
         xlm(src)
+
+    # using intermediate outputs with gradient
+    def print_outputs_with_grad(module, grad_in, grad_out, inputs, outputs):
+        print('%s input-gradient pairs: ' % module.name, end='')
+        for inp, grad in zip(inputs, grad_in):
+            print(inp.dtype, type(grad), end=', ')
+        print('')
+        print('%s output-gradient pairs: ' % module.name, end='')
+        for out, grad in zip(outputs, grad_out):
+            print(out.dtype, type(grad), end=', ')
+        print('')
+
+    named_modules = {'attn%d' % i: attn for i, attn in enumerate(xlm.transformer.attentions)}
+    hookmngr.register_backward_hook(print_outputs_with_grad, hook_fn_name='print_outputs_with_grad',
+                                    activate=False, retain_forward_cache=True, **named_modules)
+
+    with hookmngr.hook_all_context(hook_types=[print_outputs_with_grad]):
+        out, = xlm(src)
+        mt_loss(out, trg).backward()

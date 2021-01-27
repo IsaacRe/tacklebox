@@ -31,6 +31,16 @@ def validate_hook_category(fn):
     return wrapped_fn
 
 
+def _clone_cache(cache):
+    ret = []
+    for val in cache:
+        if type(val) == torch.Tensor:
+            ret += [val.clone()]
+        else:
+            ret += [val]
+    return ret
+
+
 class HookFunction:
 
     HOOK_TYPES = ['forward_hook', 'backward_hook', 'forward_pre_hook']
@@ -332,14 +342,15 @@ class HookManager:
         return ret_dict
 
     def _get_hook_params_backward(self, module, retain_forward_cache=False, recursion_depth=0):
+        # clone tensors before passing them so backward pass is not disrupted by hook functions
         ret_dict = {
             'module': module,
-            'grad_in': self.input_grad_cache[module.name],
-            'grad_out': self.output_grad_cache[module.name],
+            'grad_in': _clone_cache(self.input_grad_cache[module.name]),
+            'grad_out': _clone_cache(self.output_grad_cache[module.name]),
         }
         if retain_forward_cache:
-            ret_dict['inputs'] = self.input_cache[module.name]
-            ret_dict['outputs'] = self.output_cache[module.name]
+            ret_dict['inputs'] = _clone_cache(self.input_cache[module.name])
+            ret_dict['outputs'] = _clone_cache(self.output_cache[module.name])
 
         """for param_name, _ in module.named_parameters():
             if param_name not in self.valid_module_params[module.name]:
