@@ -9,11 +9,11 @@ import torch
 def pre_hook(module, inputs):
     print('setting %s input to zero' % module.name)
     input, = inputs
-    return input - input
+    return (input - input,)
 
 
-def forward_hook(module, inputs, output):
-    print('%s input shape: %s, output shape: %s' % (module.name, repr(inputs[0].shape), repr(output.shape)))
+def forward_hook(module, inputs, outputs):
+    print('%s input shape: %s, output shape: %s' % (module.name, repr(inputs[0].shape), repr(outputs[0].shape)))
 
 
 def backward_hook(module, grad_in, grad_out):

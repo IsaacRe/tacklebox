@@ -187,22 +187,27 @@ class ModuleTracker:
         return self.protocol['track_%s' % var] and self.pass_count % self.protocol['record_every_%s' % var] == 0
 
     # TODO modify to allow tracking for modules with multiple inputs
-    def forward_hook(self, module, input, output):
-        (inp,) = input
+    def forward_hook(self, module, inputs, outputs):
+        inp, *_ = inputs
+        out, *_ = outputs
 
         if self._do_collect('inp'):
             self._insert_module_data(module.name, 'inp', inp.data.cpu())
         if self._do_collect('out'):
-            self._insert_module_data(module.name, 'out', output.data.cpu())
+            self._insert_module_data(module.name, 'out', out.data.cpu())
 
         self._complete_module_forward(module.name)
 
     def backward_hook(self, module, grad_in, grad_out):
-        (grad_in,) = grad_in
+        print('in grads: ', [type(grad) for grad in grad_in])
+        print('out grads: ', [type(grad) for grad in grad_out])
 
-        if self._do_collect('inp_grad'):
+        grad_in, *_ = grad_in
+        grad_out, *_ = grad_out
+
+        if self._do_collect('inp_grad') and grad_in is not None:
             self._insert_module_data(module.name, 'inp_grad', grad_in.cpu())
-        if self._do_collect('out_grad'):
+        if self._do_collect('out_grad') and grad_out is not None:
             self._insert_module_data(module.name, 'out_grad', grad_out.cpu())
 
         self._complete_module_backward(module.name)
