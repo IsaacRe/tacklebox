@@ -1,3 +1,4 @@
+from copy import copy
 from inspect import getfullargspec
 from .helpers import CustomContext
 from torch import Tensor
@@ -136,6 +137,10 @@ class HookFunction:
             handles += [handle]
         self.handles += handles
         return handles
+
+    def deactivate_all_handles(self):
+        for handle in self.handles:
+            handle.deactivate()
 
 
 class HookHandle:
@@ -602,6 +607,58 @@ class HookManager:
                                   activate=True, **named_modules):
         self.register_hook('forward_pre_hook', function, *modules,
                            hook_fn_name=hook_fn_name, activate=activate, **named_modules)
+
+    def _remove_base_hook(self, handle):
+        # remove from hook fn's lookup tables
+        handle.hook_fn.handles.remove(handle)
+        handle.hook_fn.module_to_handle.pop(handle.module)
+
+    def remove_hook(self, handle):
+        handle.deactivate()
+        # remove from hook manager's lookup tables
+        self.name_to_hookhandle.pop(handle.name)
+        self.module_to_hookhandle[handle.module].remove(handle)
+
+        # remove from hook fn's lookup tables
+        handle.hook_fn.handles.remove(handle)
+        handle.hook_fn.module_to_handle.pop(handle.module)
+
+        # deactivate base hooks if module is now inactive
+        if self.wrap_calls and len(self.module_to_hookhandle[handle.module]) == 0:
+            self._deactivate_base_hooks(handle.module)
+        # update _retain_forward_cache
+        if handle in self._retain_forward_cache[handle.module]:
+            self._retain_forward_cache[handle.module].remove(handle)
+
+    def remove_hook_by_name(self, handle_name):
+        self.remove_hook(self.name_to_hookhandle[handle_name])
+
+    def remove_hook_function(self, function):
+        hook_fn = self.function_to_hookfn[function]
+        for handle in copy(hook_fn.handles):
+            self.remove_hook(handle)
+        # remove from hook manager's lookup tables
+        self.name_to_hookfn.pop(hook_fn.name)
+        self.function_to_hookfn.pop(function)
+
+    def remove_hook_function_by_name(self, hook_fn_name):
+        self.remove_hook_function(self.name_to_hookfn[hook_fn_name])
+
+    def remove_module(self, module):
+        for handle in copy(self.module_to_hookhandle[module]):
+            self.remove_hook(handle)
+        # remove from hook manager lookup tables
+        self.name_to_module.pop(module.name)
+        self.module_to_hookhandle.pop(module)
+        self.modules.remove(module)
+        # remove corresponding base hook handles
+        for hook_fn in [self.base_forward_hook_fn, self.base_forward_pre_hook_fn]:
+            if module in hook_fn.module_to_handle:
+                handle = hook_fn.module_to_handle.pop(module)
+                hook_fn.handles.remove(handle)
+
+    def remove_module_by_name(self, module_name):
+        self.remove_module(self.name_to_module[module_name])
 
     def is_module_hooked(self, module):
         active_hooks = list(self.get_module_hooks(module, include_inactive=False, include_base_hooks=False))
