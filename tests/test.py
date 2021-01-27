@@ -24,7 +24,7 @@ if __name__ == '__main__':
     model = resnet18()
     model.cuda()
 
-    dataset = CIFAR100('../data/', train=True, transform=Compose([Resize((224, 224)), ToTensor()]))
+    dataset = CIFAR100('../../data/', train=True, transform=Compose([Resize((224, 224)), ToTensor()]))
     loader = DataLoader(dataset)
 
     x, y = next(iter(loader))
