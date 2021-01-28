@@ -1,4 +1,4 @@
-![logo](logo-words.png "TackleBox")
+![logo](logo/logo-words.png "TackleBox")
 
 A framework for improved handling of PyTorch module hooks
 
@@ -33,8 +33,7 @@ forward pass. This allows us to establish correspondence between
 the gradient tensors received by the backward hook and
 the input/output tensors received by the forward hook.
 
-With TackleBox you can continue to use the module backward hooks you relied
-on, and benefit from consistency in the ordering 
+With TackleBox you can continue to use module backward hooks and benefit from consistency in the ordering 
 of gradient tensors served.
 
 ## Quickstart
