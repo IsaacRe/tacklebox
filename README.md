@@ -33,7 +33,8 @@ forward pass. This allows us to establish correspondence between
 the gradient tensors received by the backward hook and
 the input/output tensors received by the forward hook.
 
-With TackleBox you can continue to use module backward hooks and benefit from consistency in the ordering 
+With TackleBox you can continue to use module backward hooks, even with 
+older PyTorch versions ( < 1.8.0 ), and benefit from consistency in the ordering 
 of gradient tensors served.
 
 ## Quickstart
@@ -72,7 +73,16 @@ immediately before a module's forward pass and backward hooks will be called at 
 of a module's backward pass.
 
 #### Registering hooks
-Rather than registering hooks on a module directly, hook functions are passed to the hook manager
+Using PyTorch module hooks, hook registration might look something like this:
+```python
+my_handle = my_module.register_forward_hook(my_forward_hook)
+other_handle = other_module.register_forward_hook(my_forward_hook)
+...
+```
+In this case you must maintain a hook handle for each new module and hook function
+you decide to register.
+
+With TackleBox, rather than registering hooks on a module directly, hook functions are passed to the hook manager
 along with any modules that you would like it to be registered on. Hook functions should be passed
 to the corresponding registration function and assigned an id using kwargs:
 ```python
@@ -98,13 +108,14 @@ hookmngr.register_backward_hook(my_backward_hook,
                                 other_module_name=other_module,
                                 **more_named_modules)
 ```
-
+Note that there is no need to maintain any additional references, other than
+that of the hook manager.
 #### Activating hooks
 Once registered, your hooks can be activated and deactivated on the fly,
 using a variety of filtering options. By default, hooks are activated upon registration.
 To register a hook without immediately activating it, pass ``activate=False``:
 ```python
-hookmngr.register_forward_hook(my_forward_hook, my_module_id=my_module,
+hookmngr.register_forward_hook(my_forward_hook, my_module_name=my_module,
                                activate=False)
 ```
 
@@ -161,8 +172,92 @@ with hookmngr.hook_module_context(my_module, other_module, *more_modules):
 Both the above context methods accept the same kwargs for filtering as the activate and deactivate
 methods (ie. ``hook_types`` and ``category``).
 
+#### *HookFunction* and *HookHandle* objects
+When a new hook function is registered on a module, the function is wrapped in 
+a ``HookFunction`` object. HookFunctions contain the function to be called
+at the corresponding entry point as well as a dictionary of modules that it
+has been registered to, the corresponding handle for each
+
+Each registration event yields a handle. TackleBox represents these handles as
+`HookHandle` objects that maintain references to the corresponding module and 
+HookFunction involved in the registration event. ``HookHandle.activate()``
+and ``HookHandle.deactivate()`` may be used to activate and deactivate the
+corresponding hook function on the corresponding module.
+```python
+# access the HookHandle obtained from registering hook_function on my_module
+hook_handle = hook_function.module_to_handle[my_module]
+
+hook_handle.module  #  = my_module
+hook_handle.hook_fn  # = hook_function
+
+# activate/deactivate hook_function for my_module
+hook_handle.activate()
+hook_handle.deactivate()
+```
+
+#### Looking-up registered hooks
+The hook manager maintains lookup tables for all HookFunctions, modules and 
+HookHandles that have been registered. The user can access these objects using
+their id. We saw how module id is assigned when registering a module in the previous
+examples. Registered modules can be accessed with:
+```python
+hookmngr.name_to_module['my_module_name']
+```
+
+HookFunction ids can also be assigned during registration by using the 
+``hook_fn_name`` kwarg:
+```python
+hookmngr.register_forward_hook(my_forward_hook, hook_fn_name='my_forward_hook')
+```
+If no id is passed, the HookFunction will be assigned an id using ``repr(function)``
+to convert the passed function to a string.
+
+Registered HookFunctions can be accessed by id:
+```python
+hookmngr.name_to_hookfn['my_forward_hook']
+```
+
+When hook functions are registered to modules by the hook manager, the resulting
+HookHandle is given an id of the form `my_hook[my_module]` where ``my_hook`` is the 
+id of the HookFunction and ``my_module`` is the id of the module registered to.
+
+Specific handles can be accessed using this id:
+```python
+# access the HookHandle obtained from registering my_forward_hook on my_module
+hookmngr.name_to_hookhandle['my_forward_hook[my_module]']
+```
+This lookup provides an easy way to visualize all currently registered hook across
+all modules.
+
+#### Removing hooks
+Removing a hook will deactivate it then purge it from all records maintained by the hook manager.
+This means that later calls to activate hooks will be unable to reactivate it.
+Hooks can be removed by hook function, module or
+hook handle (a module, hook function pair):
+```python
+hookmngr.remove_hook_function(my_forward_hook)
+
+hookmngr.remove_module_by_name('my_module')
+
+hookmngr.remove_hook_by_name('my_forward_hook[my_module]')
+```
+This lets us remove registered hooks with varying degrees of selectivity, using
+a single line code.
+
+Using the native PyTorch module hook registration, hook removal requires
+iteration over maintained handles:
+
+```python
+my_handle.remove()
+other_handle.remove()
+...
+```
+With TackleBox you need not worry about module handles. Register and remove hooks
+to and from groups of modules all at once, filtering the set of active hooks
+at any point during experimentation. This is the power of TackleBox.
+
 ## Tutorials and walkthroughs
-For further reference, see "Hook Management - part 1.ipynb" and
-"Hook Management - part 2.ipynb" or checkout the [website](https://isaacrehg.com/tacklebox/)
+For further reference, see [Hook Management - part 1.ipynb](Hook%20Management%20-%20part%201.ipynb) and
+[Hook Management - part 2.ipynb](Hook%20Management%20-%20part%202.ipynb) or checkout the [website](https://isaacrehg.com/tacklebox/)
 for video
 walkthroughs.
