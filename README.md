@@ -258,6 +258,12 @@ at any point during experimentation. This is the power of TackleBox.
 
 ## Tutorials and walkthroughs
 For further reference, see [Hook Management - part 1.ipynb](Hook%20Management%20-%20part%201.ipynb) and
-[Hook Management - part 2.ipynb](Hook%20Management%20-%20part%202.ipynb) or checkout the [website](https://isaacrehg.com/tacklebox/)
+[Hook Management - part 2.ipynb](Hook%20Management%20-%20part%202.ipynb). Before running, install the notebooks' dependencies with
+
+```shell
+pip install -r requirements.txt
+```
+
+You can also checkout the [website](https://isaacrehg.com/tacklebox/)
 for video
 walkthroughs.
